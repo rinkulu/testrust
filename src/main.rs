@@ -38,7 +38,7 @@ async fn handle_connection(mut stream: TcpStream) {
     }
 
     let request: Request = serde_json::from_slice(&buf).unwrap();
-    let uuid = request.uuid.clone();
+    let uuid = request.request_id.clone();
     match request.command.to_lowercase().as_str() {
         "ping" => send_response(stream, uuid, "pong").await,
         "echo" => send_response(stream, uuid, request.payload).await,
@@ -55,14 +55,14 @@ async fn process_command_calculate(stream: TcpStream, req: Request) {
     let value = match req.payload {
         Some(v) => v,
         None => {
-            send_error(stream, Some(req.uuid), "payload not included").await;
+            send_error(stream, Some(req.request_id), "payload not included").await;
             return;
         }
     };
     let payload = match serde_json::from_value::<CalculationPayload>(value) {
         Ok(v) => v,
         Err(e) => {
-            send_error(stream, Some(req.uuid), e.to_string()).await;
+            send_error(stream, Some(req.request_id), e.to_string()).await;
             return;
         }
     };
@@ -73,18 +73,18 @@ async fn process_command_calculate(stream: TcpStream, req: Request) {
         Operation::Multiply => payload.a * payload.b,
         Operation::Divide => {
             if payload.b == 0.0 {
-                send_error(stream, Some(req.uuid), "division by zero").await;
+                send_error(stream, Some(req.request_id), "division by zero").await;
                 return;
             }
             payload.a / payload.b
         }
     };
-    send_response(stream, req.uuid, json!({"result": result})).await;
+    send_response(stream, req.request_id, json!({"result": result})).await;
 }
 
 async fn send_response<V: Into<Value>>(stream: TcpStream, uuid: String, response: V) {
     let resp = Response {
-        uuid: uuid,
+        request_id: uuid,
         status: Status::Ok,
         response: response.into()
     };
@@ -93,7 +93,7 @@ async fn send_response<V: Into<Value>>(stream: TcpStream, uuid: String, response
 
 async fn send_error<E: Into<String>>(stream: TcpStream, uuid: Option<String>, error: E) {
     let resp = ErrorResponse {
-        uuid: uuid,
+        request_id: uuid,
         status: Status::Error,
         error: error.into()
     };

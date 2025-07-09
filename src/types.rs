@@ -3,7 +3,7 @@ use serde_json::Value;
 
 #[derive(Deserialize)]
 pub struct Request {
-    pub uuid: String,
+    pub request_id: String,
     pub command: String,
     pub payload: Option<Value>,
 }
@@ -17,15 +17,15 @@ pub enum Status {
 
 #[derive(Serialize)]
 pub struct ErrorResponse {
-    // in case of invalid JSON or missing "uuid" field, we won't be able copy it from the request
-    pub uuid: Option<String>,
+    // in case of invalid JSON or missing "request_id" field, we won't be able copy it from the request
+    pub request_id: Option<String>,
     pub status: Status,
     pub error: String
 }
 
 #[derive(Serialize, Debug)]
 pub struct Response {
-    pub uuid: String,
+    pub request_id: String,
     pub status: Status,
     pub response: Value,
 }
