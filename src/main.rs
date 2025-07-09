@@ -25,6 +25,22 @@ struct Response {
     response: Value,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Operation {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+}
+
+#[derive(Deserialize)]
+struct CalculationPayload {
+    operation: Operation,
+    a: f64,
+    b: f64,
+}
+
 #[tokio::main]
 async fn main() {
     let listener = TcpListener::bind("localhost:7878").await.unwrap();
@@ -54,7 +70,7 @@ async fn handle_connection(mut stream: TcpStream) {
             resp.response = json!(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
         }
         "calculate" => {
-            (resp.status, resp.response) = process_command_calculate(&request).await;
+            (resp.status, resp.response) = process_command_calculate(request).await;
         }
         _ => {
             resp.status = Status::Error;
@@ -69,6 +85,25 @@ async fn handle_connection(mut stream: TcpStream) {
         .unwrap();
 }
 
-async fn process_command_calculate(req: &Request) -> (Status, Value) {
-    unimplemented!()
+async fn process_command_calculate(req: Request) -> (Status, Value) {
+    let value = match req.payload {
+        Some(v) => v,
+        None => return (Status::Error, json!("payload not provided")),
+    };
+    let payload = match serde_json::from_value::<CalculationPayload>(value) {
+        Ok(v) => v,
+        Err(e) => {
+            return (Status::Error, json!(e.to_string()));
+        }
+    };
+
+    let status = Status::Ok;
+    let result = match payload.operation {
+        Operation::Add => payload.a + payload.b,
+        Operation::Subtract => payload.a - payload.b,
+        Operation::Multiply => payload.a * payload.b,
+        Operation::Divide => payload.a / payload.b,
+    };
+
+    (status, json!(result))
 }
