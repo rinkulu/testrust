@@ -9,9 +9,21 @@ use types::*;
 
 #[tokio::main]
 async fn main() {
-    let listener = TcpListener::bind("localhost:7878").await.unwrap();
+    let listener = match TcpListener::bind("localhost:7878").await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Couldn't start the server: {e}");
+            return;
+        }
+    };
     loop {
-        let (socket, _) = listener.accept().await.unwrap();
+        let (socket, _) = match listener.accept().await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Couldn't accept an incoming connection: {e}");
+                continue;
+            }
+        };
         tokio::spawn(async move {
             handle_connection(socket).await;
         });
@@ -20,58 +32,54 @@ async fn main() {
 
 async fn handle_connection(mut stream: TcpStream) {
     let mut buf = Vec::new();
-    stream.read_to_end(&mut buf).await.unwrap();
-
-    let request: Request = serde_json::from_slice(&buf).unwrap();
-    let mut resp = Response {
-        uuid: request.uuid.clone(),
-        status: Status::Ok,
-        response: Value::Null,
-    };
-
-    match request.command.to_lowercase().as_str() {
-        "ping" => resp.response = json!("pong"),
-        "echo" => resp.response = request.payload.unwrap(),
-        "time" => {
-            resp.response = json!(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
-        }
-        "calculate" => {
-            (resp.status, resp.response) = process_command_calculate(request).await;
-        }
-        _ => {
-            resp.status = Status::Error;
-            resp.response = json!("unknown command");
-        }
+    if let Err(e) = stream.read_to_end(&mut buf).await {
+        eprintln!("Reading data failed with error: {e}");
+        return;
     }
 
-    println!("{:?}", serde_json::to_string(&resp));
-    stream
-        .write_all(&serde_json::to_vec(&resp).unwrap())
-        .await
-        .unwrap();
+    let request: Request = serde_json::from_slice(&buf).unwrap();
+    let uuid = request.uuid.clone();
+    match request.command.to_lowercase().as_str() {
+        "ping" => send_response(stream, uuid, "pong").await,
+        "echo" => send_response(stream, uuid, request.payload).await,
+        "time" => {
+            let time = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            send_response(stream, uuid, json!({"time": time})).await;
+        }
+        "calculate" => process_command_calculate(stream, request).await,
+        _ => send_error(stream, Some(uuid), "unknown command").await,
+    }
 }
 
-async fn process_command_calculate(req: Request) -> (Status, Value) {
+async fn process_command_calculate(stream: TcpStream, req: Request) {
     let value = match req.payload {
         Some(v) => v,
-        None => return (Status::Error, json!("payload not provided")),
+        None => {
+            send_error(stream, Some(req.uuid), "payload not included").await;
+            return;
+        }
     };
     let payload = match serde_json::from_value::<CalculationPayload>(value) {
         Ok(v) => v,
         Err(e) => {
-            return (Status::Error, json!(e.to_string()));
+            send_error(stream, Some(req.uuid), e.to_string()).await;
+            return;
         }
     };
 
-    let status = Status::Ok;
     let result = match payload.operation {
         Operation::Add => payload.a + payload.b,
         Operation::Subtract => payload.a - payload.b,
         Operation::Multiply => payload.a * payload.b,
-        Operation::Divide => payload.a / payload.b,
+        Operation::Divide => {
+            if payload.b == 0.0 {
+                send_error(stream, Some(req.uuid), "division by zero").await;
+                return;
+            }
+            payload.a / payload.b
+        }
     };
-
-    (status, json!(result))
+    send_response(stream, req.uuid, json!({"result": result})).await;
 }
 
 async fn send_response<V: Into<Value>>(stream: TcpStream, uuid: String, response: V) {
@@ -93,16 +101,16 @@ async fn send_error<E: Into<String>>(stream: TcpStream, uuid: Option<String>, er
 }
 
 async fn _send<T: Serialize>(mut stream: TcpStream, resp: T) {
-    println!("{:?}", serde_json::to_string(&resp));
     let data = match serde_json::to_vec(&resp) {
         Ok(v) => v,
-        Err(_) => {
-            //TODO: logging
+        Err(e) => {
+            eprintln!("Sending failed - couldn't serialize the provided response: {e}");
             return;
         }
     };
-    if let Err(_) = stream.write_all(&data).await {
-        //TODO: logging
+    println!("{:?}", serde_json::to_string(&resp));
+    if let Err(e) = stream.write_all(&data).await {
+        eprintln!("Sending failed: {e}");
         return;
     };
 }
