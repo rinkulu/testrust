@@ -1,4 +1,5 @@
 use chrono::Utc;
+use log::{debug, error, info};
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -10,27 +11,29 @@ use crate::types::*;
 pub async fn handle_connection(mut stream: TcpStream) {
     let mut buf = Vec::new();
     if let Err(e) = stream.read_to_end(&mut buf).await {
-        eprintln!("Reading data failed with error: {e}");
+        error!("Failed to receive data: {e}");
         return;
     }
 
     // first, check if the input is a valid JSON
     let json_data = match serde_json::from_slice::<Value>(&buf) {
         Ok(v) => v,
-        _ => {
+        Err(e) => {
+            debug!("Received data is not a valid JSON: {e}");
             send_error(stream, None, "request is not a valid JSON").await;
             return;
         }
     };
-
     // then try deserializing it into Request
     let request = match serde_json::from_value::<Request>(json_data) {
         Ok(v) => v,
         Err(e) => {
+            debug!("Received data is not a valid request: {e}");
             send_error(stream, None, e.to_string()).await;
             return;
         }
     };
+    info!("Received request: {request:?}");
 
     match request.command.to_lowercase().as_str() {
         "ping" => send_response(stream, request.request_id, "pong").await,
@@ -40,7 +43,10 @@ pub async fn handle_connection(mut stream: TcpStream) {
             send_response(stream, request.request_id, json!({"time": time})).await;
         }
         "calculate" => process_command_calculate(stream, request).await,
-        _ => send_error(stream, Some(request.request_id), "unknown command").await,
+        unknown => {
+            debug!("Received request contains unknown command: {unknown}");
+            send_error(stream, Some(request.request_id), "unknown command").await;
+        }
     }
 }
 
@@ -93,17 +99,17 @@ async fn send_error<E: Into<String>>(stream: TcpStream, uuid: Option<Uuid>, erro
     _send(stream, resp).await;
 }
 
-async fn _send<T: Serialize>(mut stream: TcpStream, resp: T) {
+async fn _send<T: Serialize + std::fmt::Debug>(mut stream: TcpStream, resp: T) {
     let data = match serde_json::to_vec(&resp) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("Sending failed - couldn't serialize the provided response: {e}");
+            error!("Sending failed - couldn't serialize the provided response (how?): {e}");
             return;
         }
     };
-    println!("{:?}", serde_json::to_string(&resp));
+    info!("Sending response: {resp:?}");
     if let Err(e) = stream.write_all(&data).await {
-        eprintln!("Sending failed: {e}");
+        error!("Sending failed: {e}");
         return;
     };
 }

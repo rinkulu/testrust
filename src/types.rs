@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Request {
     pub request_id: Uuid,
     pub command: String,
@@ -16,7 +16,7 @@ pub enum Status {
     Error,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct ErrorResponse {
     pub request_id: Option<Uuid>,
     pub status: Status,
