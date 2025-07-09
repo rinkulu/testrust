@@ -1,45 +1,10 @@
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-#[derive(Deserialize)]
-struct Request {
-    uuid: String,
-    command: String,
-    payload: Option<Value>,
-}
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "lowercase")]
-enum Status {
-    Ok,
-    Error,
-}
-
-#[derive(Serialize, Debug)]
-struct Response {
-    uuid: String,
-    status: Status,
-    response: Value,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum Operation {
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-}
-
-#[derive(Deserialize)]
-struct CalculationPayload {
-    operation: Operation,
-    a: f64,
-    b: f64,
-}
+mod types;
+use types::*;
 
 #[tokio::main]
 async fn main() {
