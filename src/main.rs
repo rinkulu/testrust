@@ -1,5 +1,6 @@
 use chrono::Utc;
-use serde_json::{Value, json};
+use serde::Serialize;
+use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -71,4 +72,37 @@ async fn process_command_calculate(req: Request) -> (Status, Value) {
     };
 
     (status, json!(result))
+}
+
+async fn send_response<V: Into<Value>>(stream: TcpStream, uuid: String, response: V) {
+    let resp = Response {
+        uuid: uuid,
+        status: Status::Ok,
+        response: response.into()
+    };
+    _send(stream, resp).await;
+}
+
+async fn send_error<E: Into<String>>(stream: TcpStream, uuid: Option<String>, error: E) {
+    let resp = ErrorResponse {
+        uuid: uuid,
+        status: Status::Error,
+        error: error.into()
+    };
+    _send(stream, resp).await;
+}
+
+async fn _send<T: Serialize>(mut stream: TcpStream, resp: T) {
+    println!("{:?}", serde_json::to_string(&resp));
+    let data = match serde_json::to_vec(&resp) {
+        Ok(v) => v,
+        Err(_) => {
+            //TODO: logging
+            return;
+        }
+    };
+    if let Err(_) = stream.write_all(&data).await {
+        //TODO: logging
+        return;
+    };
 }

@@ -15,6 +15,14 @@ pub enum Status {
     Error,
 }
 
+#[derive(Serialize)]
+pub struct ErrorResponse {
+    // in case of invalid JSON or missing "uuid" field, we won't be able copy it from the request
+    pub uuid: Option<String>,
+    pub status: Status,
+    pub error: String
+}
+
 #[derive(Serialize, Debug)]
 pub struct Response {
     pub uuid: String,
