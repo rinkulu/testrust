@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use uuid::Uuid;
 
 #[derive(Deserialize)]
 pub struct Request {
-    pub request_id: String,
+    pub request_id: Uuid,
     pub command: String,
     pub payload: Option<Value>,
 }
@@ -17,15 +18,14 @@ pub enum Status {
 
 #[derive(Serialize)]
 pub struct ErrorResponse {
-    // in case of invalid JSON or missing "request_id" field, we won't be able copy it from the request
-    pub request_id: Option<String>,
+    pub request_id: Option<Uuid>,
     pub status: Status,
-    pub error: String
+    pub error: String,
 }
 
 #[derive(Serialize, Debug)]
 pub struct Response {
-    pub request_id: String,
+    pub request_id: Uuid,
     pub status: Status,
     pub response: Value,
 }
