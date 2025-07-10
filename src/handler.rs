@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use log::{debug, error, info};
 use serde::Serialize;
@@ -33,37 +34,33 @@ pub async fn handle_connection(mut stream: TcpStream) {
             return;
         }
     };
+
     info!("Received request: {request:?}");
 
-    match request.command.to_lowercase().as_str() {
-        "ping" => send_response(stream, request.request_id, "pong").await,
-        "echo" => send_response(stream, request.request_id, request.payload).await,
-        "time" => {
-            let time = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-            send_response(stream, request.request_id, json!({"time": time})).await;
-        }
-        "calculate" => process_command_calculate(stream, request).await,
-        unknown => {
-            debug!("Received request contains unknown command: {unknown}");
-            send_error(stream, Some(request.request_id), "unknown command").await;
-        }
+    let uuid = request.request_id;
+    match process_request(request).await {
+        Ok(v) => send_response(stream, uuid, v).await,
+        Err(e) => send_error(stream, Some(uuid), e.to_string()).await,
     }
 }
 
-async fn process_command_calculate(stream: TcpStream, req: Request) {
-    let value = match req.payload {
-        Some(v) => v,
-        None => {
-            send_error(stream, Some(req.request_id), "payload not included").await;
-            return;
+async fn process_request(request: Request) -> Result<Value> {
+    match request.command.to_lowercase().as_str() {
+        "ping" => Ok(json!("pong")),
+        "echo" => Ok(request.payload.unwrap()),
+        "time" => {
+            let time = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            Ok(json!({"time": time}))
         }
-    };
-    let payload = match serde_json::from_value::<CalculationPayload>(value) {
-        Ok(v) => v,
-        Err(e) => {
-            send_error(stream, Some(req.request_id), e.to_string()).await;
-            return;
-        }
+        "calculate" => process_command_calculate(request).await,
+        unknown => Err(anyhow!("unknown command: {unknown}")),
+    }
+}
+
+async fn process_command_calculate(req: Request) -> Result<Value> {
+    let payload = match req.payload {
+        Some(v) => serde_json::from_value::<CalculationPayload>(v)?,
+        None => return Err(anyhow!("missing `payload` field")),
     };
 
     let result = match payload.operation {
@@ -72,13 +69,13 @@ async fn process_command_calculate(stream: TcpStream, req: Request) {
         Operation::Multiply => payload.a * payload.b,
         Operation::Divide => {
             if payload.b == 0.0 {
-                send_error(stream, Some(req.request_id), "division by zero").await;
-                return;
+                return Err(anyhow!("division by zero"));
             }
             payload.a / payload.b
         }
     };
-    send_response(stream, req.request_id, json!({"result": result})).await;
+
+    Ok(json!({"result": result}))
 }
 
 async fn send_response<V: Into<Value>>(stream: TcpStream, uuid: Uuid, response: V) {
