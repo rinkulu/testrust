@@ -3,6 +3,7 @@ use ftail::Ftail;
 use log::{LevelFilter, debug, error, info};
 use std::path::PathBuf;
 use tokio::net::TcpListener;
+use tokio::task::JoinSet;
 
 mod handler;
 mod types;
@@ -27,10 +28,11 @@ async fn main() {
         true => LevelFilter::Debug,
         false => LevelFilter::Info,
     };
+    let logfile = cli.log_file.as_path();
 
     // setting up the logger
     if let Err(e) = Ftail::new()
-        .single_file(&cli.log_file, true, loglevel)
+        .single_file(logfile, true, loglevel)
         .timezone(ftail::Tz::UTC)
         .init()
     {
@@ -39,30 +41,55 @@ async fn main() {
     }
 
     // setting up the listener
-    let listener = match TcpListener::bind("localhost:7878").await {
+    let server_addr = "localhost:7878";
+    let listener = match TcpListener::bind(server_addr).await {
         Ok(v) => v,
         Err(e) => {
             error!("Couldn't start the server: {e}");
             return;
         }
     };
-    info!("Server started.");
+    let mut tasks = JoinSet::new();
+
+    info!("Server started on {server_addr}, ready to accept connections.");
+    println!(
+        "Server started on {server_addr}. Logs are available at {}",
+        logfile.display()
+    );
 
     // accepting connections
     loop {
-        let (socket, addr) = match listener.accept().await {
-            Ok(v) => v,
-            Err(e) => {
-                error!("Couldn't accept an incoming connection: {e}");
-                continue;
+        tokio::select! {
+            conn = listener.accept() => {
+                let (socket, addr) = match conn {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Couldn't accept an incoming connection: {e}");
+                        continue;
+                    }
+                };
+                debug!("Accepted incoming connection from {addr}.");
+                tasks.spawn(async move {
+                    handler::handle_connection(socket).await;
+                });
             }
-        };
-        debug!("Accepted incoming connection from {addr}.");
-        tokio::spawn(async move {
-            handler::handle_connection(socket).await;
-        });
+            sigint = tokio::signal::ctrl_c() => {
+                if let Err(e) = sigint {
+                    error!("Failed to set up Ctrl+C signal handler: {e}");
+                    error!("Shutting down the server now since we are unable to receive stop signals properly.");
+                    eprintln!("Unexpected error occurred: unable to listen for Ctrl+C signal. Stopping the server...");
+                }
+                else {
+                    info!("Shutdown signal received, stopping acceptance of new connections.");
+                    println!("Stopping the server...");
+                }
+                break;
+            }
+        }
     }
 
-    // TODO: graceful shutdown
-    // info!("Server shut down.");
+    info!("Waiting for existing connections to finish...");
+    tasks.join_all().await;
+    info!("Server shut down.");
+    println!("Server stopped.");
 }
