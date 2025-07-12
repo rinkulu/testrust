@@ -5,7 +5,6 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use uuid::Uuid;
 
 use crate::types::*;
 
@@ -21,7 +20,15 @@ pub async fn handle_connection(mut stream: TcpStream) {
         Ok(v) => v,
         Err(e) => {
             debug!("Received data is not a valid JSON: {e}");
-            send_error(stream, None, "request is not a valid JSON").await;
+            send_response(
+                stream,
+                ErrorResponse {
+                    request_id: None,
+                    status: Status::Error,
+                    error: "request is not a valid JSON".to_string(),
+                },
+            )
+            .await;
             return;
         }
     };
@@ -30,21 +37,40 @@ pub async fn handle_connection(mut stream: TcpStream) {
         Ok(v) => v,
         Err(e) => {
             debug!("Received data is not a valid request: {e}");
-            send_error(stream, None, e.to_string()).await;
+            send_response(
+                stream,
+                ErrorResponse {
+                    request_id: None,
+                    status: Status::Error,
+                    error: e.to_string(),
+                },
+            )
+            .await;
             return;
         }
     };
 
     info!("Received request: {request:?}");
+    send_response(stream, process_request(request).await).await;
+}
 
+async fn process_request(request: Request) -> Response {
     let uuid = request.request_id;
-    match process_request(request).await {
-        Ok(v) => send_response(stream, uuid, v).await,
-        Err(e) => send_error(stream, Some(uuid), e.to_string()).await,
+    match process_command(request).await {
+        Ok(v) => Response::Ok(OkResponse {
+            request_id: uuid,
+            status: Status::Ok,
+            response: v,
+        }),
+        Err(e) => Response::Err(ErrorResponse {
+            request_id: Some(uuid),
+            status: Status::Error,
+            error: e.to_string(),
+        }),
     }
 }
 
-async fn process_request(request: Request) -> Result<Value> {
+async fn process_command(request: Request) -> Result<Value> {
     match request.command.to_lowercase().as_str() {
         "ping" => Ok(json!("pong")),
         "echo" => Ok(request.payload.unwrap()),
@@ -78,25 +104,7 @@ async fn process_command_calculate(req: Request) -> Result<Value> {
     Ok(json!({"result": result}))
 }
 
-async fn send_response<V: Into<Value>>(stream: TcpStream, uuid: Uuid, response: V) {
-    let resp = Response {
-        request_id: uuid,
-        status: Status::Ok,
-        response: response.into(),
-    };
-    _send(stream, resp).await;
-}
-
-async fn send_error<E: Into<String>>(stream: TcpStream, uuid: Option<Uuid>, error: E) {
-    let resp = ErrorResponse {
-        request_id: uuid,
-        status: Status::Error,
-        error: error.into(),
-    };
-    _send(stream, resp).await;
-}
-
-async fn _send<T: Serialize + std::fmt::Debug>(mut stream: TcpStream, resp: T) {
+async fn send_response<T: Serialize + std::fmt::Debug>(mut stream: TcpStream, resp: T) {
     let data = match serde_json::to_vec(&resp) {
         Ok(v) => v,
         Err(e) => {
