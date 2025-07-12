@@ -79,6 +79,14 @@ async fn process_command(request: Request) -> Result<Value> {
             Ok(json!({"time": time}))
         }
         "calculate" => process_command_calculate(request).await,
+        "batch" => {
+            let batch: Vec<Request> = serde_json::from_value(request.payload.unwrap())?;
+            let mut result: Vec<Response> = Vec::new();
+            for item in batch {
+                result.push(Box::pin(process_request(item)).await);
+            }
+            Ok(json!(result))
+        }
         unknown => Err(anyhow!("unknown command: {unknown}")),
     }
 }
