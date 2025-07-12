@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use tokio::net::TcpListener;
 use tokio::task::JoinSet;
 
+mod commands;
 mod handler;
 mod types;
 
