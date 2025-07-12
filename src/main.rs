@@ -2,6 +2,7 @@ use clap::Parser;
 use ftail::Ftail;
 use log::{LevelFilter, debug, error, info};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tokio::task::JoinSet;
 
@@ -58,6 +59,9 @@ async fn main() {
         logfile.display()
     );
 
+    // setting up metrics
+    let metrics = Arc::new(Mutex::new(types::Metrics::default()));
+
     // accepting connections
     loop {
         tokio::select! {
@@ -70,8 +74,9 @@ async fn main() {
                     }
                 };
                 debug!("Accepted incoming connection from {addr}.");
+                let m_clone = metrics.clone();
                 tasks.spawn(async move {
-                    handler::handle_connection(socket).await;
+                    handler::handle_connection(socket, m_clone).await;
                 });
             }
             sigint = tokio::signal::ctrl_c() => {

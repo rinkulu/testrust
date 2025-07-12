@@ -1,13 +1,14 @@
-use log::{debug, error, info};
+use log::{debug, error};
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::commands::*;
 use crate::types::*;
 
-pub async fn handle_connection(mut stream: TcpStream) {
+pub async fn handle_connection(mut stream: TcpStream, metrics: Arc<Mutex<Metrics>>) {
     let mut buf = Vec::new();
     if let Err(e) = stream.read_to_end(&mut buf).await {
         error!("Failed to receive data: {e}");
@@ -48,12 +49,15 @@ pub async fn handle_connection(mut stream: TcpStream) {
             return;
         }
     };
+    debug!(
+        "Received request: {}",
+        serde_json::to_string(&request).unwrap()
+    );
 
-    info!("Received request: {request:?}");
-    send_response(stream, form_response(request).await).await;
+    send_response(stream, form_response(request, metrics).await).await;
 }
 
-async fn send_response<T: Serialize + std::fmt::Debug>(mut stream: TcpStream, resp: T) {
+async fn send_response<T: Serialize>(mut stream: TcpStream, resp: T) {
     let data = match serde_json::to_vec(&resp) {
         Ok(v) => v,
         Err(e) => {
@@ -61,9 +65,13 @@ async fn send_response<T: Serialize + std::fmt::Debug>(mut stream: TcpStream, re
             return;
         }
     };
-    info!("Sending response: {resp:?}");
+    debug!(
+        "Sending response: {}",
+        serde_json::to_string(&resp).unwrap()
+    );
     if let Err(e) = stream.write_all(&data).await {
         error!("Sending failed: {e}");
         return;
     };
+    debug!("Response sent.")
 }

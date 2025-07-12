@@ -1,12 +1,20 @@
 use anyhow::{Result, anyhow};
 use chrono::Utc;
+use log::debug;
 use serde_json::{Value, json};
+use std::sync::{Arc, Mutex};
 
 use crate::types::*;
 
-pub async fn form_response(request: Request) -> Response {
+pub async fn form_response(request: Request, metrics: Arc<Mutex<Metrics>>) -> Response {
+    let mut start = None;
+    if request.command != Command::Batch {
+        start = Some(std::time::Instant::now());
+    }
+
     let uuid = request.request_id;
-    match process_command(request).await {
+    let command = request.command.clone();
+    let response = match process_command(request, metrics.clone()).await {
         Ok(v) => Response::Ok(OkResponse {
             request_id: uuid,
             status: Status::Ok,
@@ -17,10 +25,24 @@ pub async fn form_response(request: Request) -> Response {
             status: Status::Error,
             error: e.to_string(),
         }),
-    }
+    };
+
+    if let Some(s) = start {
+        let duration = s.elapsed().as_micros() as f64 / 1000.0;
+        let count = {
+            let mut guard = metrics.lock().unwrap();
+            guard.update(&command, duration);
+            *guard.command_counts.get(&command).unwrap()
+        };
+        debug!(
+            "Processed command {} in {duration}ms, total number of commands of this type processed: {count}",
+            serde_plain::to_string(&command).unwrap()
+        );
+    };
+    response
 }
 
-async fn process_command(request: Request) -> Result<Value> {
+async fn process_command(request: Request, metrics: Arc<Mutex<Metrics>>) -> Result<Value> {
     match request.command {
         Command::Ping => Ok(json!("pong")),
         Command::Echo => Ok(request.payload.unwrap_or_default()),
@@ -33,7 +55,7 @@ async fn process_command(request: Request) -> Result<Value> {
             let batch: Vec<Request> = serde_json::from_value(request.payload.unwrap())?;
             let mut result: Vec<Response> = Vec::new();
             for item in batch {
-                result.push(Box::pin(form_response(item)).await);
+                result.push(Box::pin(form_response(item, metrics.clone())).await);
             }
             Ok(json!(result))
         }
