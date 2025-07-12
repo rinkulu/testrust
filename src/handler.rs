@@ -73,7 +73,7 @@ async fn process_request(request: Request) -> Response {
 async fn process_command(request: Request) -> Result<Value> {
     match request.command.to_lowercase().as_str() {
         "ping" => Ok(json!("pong")),
-        "echo" => Ok(request.payload.unwrap()),
+        "echo" => Ok(request.payload.unwrap_or_default()),
         "time" => {
             let time = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
             Ok(json!({"time": time}))
