@@ -21,15 +21,15 @@ pub async fn form_response(request: Request) -> Response {
 }
 
 async fn process_command(request: Request) -> Result<Value> {
-    match request.command.to_lowercase().as_str() {
-        "ping" => Ok(json!("pong")),
-        "echo" => Ok(request.payload.unwrap_or_default()),
-        "time" => {
+    match request.command {
+        Command::Ping => Ok(json!("pong")),
+        Command::Echo => Ok(request.payload.unwrap_or_default()),
+        Command::Time => {
             let time = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
             Ok(json!({"time": time}))
         }
-        "calculate" => process_command_calculate(request).await,
-        "batch" => {
+        Command::Calculate => process_command_calculate(request).await,
+        Command::Batch => {
             let batch: Vec<Request> = serde_json::from_value(request.payload.unwrap())?;
             let mut result: Vec<Response> = Vec::new();
             for item in batch {
@@ -37,7 +37,6 @@ async fn process_command(request: Request) -> Result<Value> {
             }
             Ok(json!(result))
         }
-        unknown => Err(anyhow!("unknown command: {unknown}")),
     }
 }
 

@@ -4,21 +4,21 @@ use uuid::Uuid;
 
 // Requests
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct Request {
     pub request_id: Uuid,
-    pub command: String,
+    pub command: Command,
     pub payload: Option<Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CalculationPayload {
     pub operation: Operation,
     pub a: f64,
     pub b: f64,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Operation {
     Add,
@@ -27,30 +27,40 @@ pub enum Operation {
     Divide,
 }
 
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum Command {
+    Ping,
+    Echo,
+    Time,
+    Calculate,
+    Batch
+}
+
 // Responses
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize)]
 #[serde(untagged)]
 pub enum Response {
     Ok(OkResponse),
     Err(ErrorResponse),
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize)]
 pub struct OkResponse {
     pub request_id: Uuid,
     pub status: Status,
     pub response: Value,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize)]
 pub struct ErrorResponse {
     pub request_id: Option<Uuid>,
     pub status: Status,
     pub error: String,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     Ok,
