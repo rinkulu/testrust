@@ -40,28 +40,28 @@ pub enum Command {
 
 // Responses
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Response {
     Ok(OkResponse),
     Err(ErrorResponse),
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct OkResponse {
     pub request_id: Uuid,
     pub status: Status,
     pub response: Value,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ErrorResponse {
     pub request_id: Option<Uuid>,
     pub status: Status,
     pub error: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     Ok,
