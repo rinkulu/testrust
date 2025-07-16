@@ -6,6 +6,15 @@ use std::sync::{Arc, Mutex};
 
 use crate::types::*;
 
+/// Processes a deserialized request, updates the performance metrics,
+/// and returns a formed response object.
+///
+/// # Parameters:
+/// - `request`: The deseriazized request to process.
+/// - `metrics`: A shared thread-safe pointer to the global `Metrics` instance.
+///
+/// # Returns:
+/// A formed `Response` object representing either a successful result or an error.
 pub async fn form_response(request: Request, metrics: Arc<Mutex<Metrics>>) -> Response {
     let mut start = None;
     if request.command != Command::Batch {
