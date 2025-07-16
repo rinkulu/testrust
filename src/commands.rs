@@ -82,3 +82,182 @@ async fn process_command_calculate(req: Request) -> Result<Value> {
 
     Ok(json!({"result": result}))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Timelike;
+    use uuid::Uuid;
+
+    fn build_metrics() -> Arc<Mutex<Metrics>> {
+        Arc::new(Mutex::new(Metrics::default()))
+    }
+
+    fn build_request(command: Command, payload: Option<Value>) -> Request {
+        Request {
+            request_id: Uuid::new_v4(),
+            command: command,
+            payload: payload,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_command_ping() {
+        let metrics = build_metrics();
+        let req = build_request(Command::Ping, None);
+        let resp = form_response(req, metrics.clone()).await;
+        match resp {
+            Response::Ok(v) => {
+                assert!(matches!(v.status, Status::Ok));
+                assert_eq!(v.response, json!("pong"));
+            }
+            Response::Err(_) => panic!("Expected OK response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_command_time() {
+        use chrono::DateTime;
+
+        let metrics = build_metrics();
+        let time = Utc::now()
+            .with_nanosecond(0)
+            .expect("This shouldn't ever panic");
+        let req = build_request(Command::Time, None);
+        let resp = form_response(req, metrics.clone()).await;
+        match resp {
+            Response::Ok(v) => {
+                assert!(matches!(v.status, Status::Ok));
+                let resp_str = v
+                    .response
+                    .get("time")
+                    .and_then(|v| v.as_str())
+                    .expect("Missing `time` field in the response");
+                let parsed = DateTime::parse_from_rfc3339(resp_str)
+                    .expect("Invalid format")
+                    .with_timezone(&Utc);
+                println!("{}", parsed);
+                println!("{}", time);
+                assert!((parsed - time).as_seconds_f32() >= 0.0);
+                assert!((parsed - time).as_seconds_f32() < 2.0);
+            }
+            Response::Err(_) => panic!("Expected OK response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_command_echo() {
+        let metrics = build_metrics();
+
+        let req = build_request(Command::Echo, Some(json!("hello")));
+        let resp = form_response(req, metrics.clone()).await;
+        match resp {
+            Response::Ok(v) => {
+                assert!(matches!(v.status, Status::Ok));
+                assert_eq!(v.response, json!("hello"));
+            }
+            Response::Err(_) => panic!("Expected OK response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_command_calculate() {
+        #[rustfmt::skip]
+        let test_data = Vec::from([
+            (json!({"operation": "add", "a": 0.1, "b": 0.2}), 0.1 + 0.2),
+            (json!({"operation": "subtract", "a": 21, "b": 9}), 12 as f64),
+            (json!({"operation": "multiply", "a": 6.0, "b": -8}), 6.0 * -8 as f64),
+            (json!({"operation": "divide", "a": 22, "b": 7}), 22 as f64 / 7 as f64),
+        ]);
+
+        let metrics = build_metrics();
+
+        for item in test_data {
+            let req = build_request(Command::Calculate, Some(json!(item.0)));
+            let resp = form_response(req, metrics.clone()).await;
+            match resp {
+                Response::Ok(v) => {
+                    assert!(matches!(v.status, Status::Ok));
+                    assert_eq!(v.response, json!({"result": item.1}));
+                }
+                Response::Err(_) => panic!("Expected OK response"),
+            }
+        }
+
+        let req = build_request(
+            Command::Calculate,
+            Some(json!({"operation": "divide", "a": 5, "b": 0})),
+        );
+        let resp = form_response(req, metrics.clone()).await;
+        match resp {
+            Response::Err(e) => assert!(matches!(e.status, Status::Error)),
+            Response::Ok(_) => panic!("Expected Error response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_command_batch() {
+        use serde::Deserialize;
+        let metrics = build_metrics();
+
+        let test_data = Vec::from([
+            (build_request(Command::Ping, None), json!("pong")),
+            (
+                build_request(Command::Echo, Some(json!({"key": "value"}))),
+                json!({"key": "value"}),
+            ),
+            (
+                build_request(
+                    Command::Calculate,
+                    Some(json!({"operation": "divide", "a": 3.5, "b": -1.05})),
+                ),
+                json!({"result": 3.5 / -1.05}),
+            ),
+        ]);
+
+        let req = build_request(
+            Command::Batch,
+            Some(json!(
+                test_data
+                    .iter()
+                    .map(|(f, _)| json!(f))
+                    .collect::<Vec<Value>>()
+            )),
+        );
+        let resp = form_response(req, metrics.clone()).await;
+
+        match resp {
+            Response::Err(_) => panic!("Expected OK response"),
+            Response::Ok(resp) => {
+                for (i, item) in resp.response.as_array().unwrap().iter().enumerate() {
+                    let content = OkResponse::deserialize(item).unwrap();
+                    assert_eq!(content.request_id, test_data[i].0.request_id);
+                    assert!(matches!(content.status, Status::Ok));
+                    assert_eq!(content.response, test_data[i].1);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_invalid_calculation_payload() {
+        #[rustfmt::skip]
+        let test_data = Vec::from([
+            None,
+            Some(Value::Null),
+            Some(json!(["only", "objects", "are", "allowed"])),
+            Some(json!({"operation": "this operation doesn't exist", "a": 6.0, "b": -8})),
+            Some(json!({"operation": "add", "first": 1, "second": 2})),
+            Some(json!({"operation": "divide", "a": 22, "b": 0})),
+        ]);
+
+        let metrics = build_metrics();
+        for item in test_data {
+            let req = build_request(Command::Calculate, item);
+            match form_response(req, metrics.clone()).await {
+                Response::Ok(_) => panic!("Expected Error response"),
+                Response::Err(content) => assert!(matches!(content.status, Status::Error)),
+            }
+        }
+    }
+}
