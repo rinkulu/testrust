@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use chrono::Utc;
-use log::debug;
+use log::info;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 
@@ -43,7 +43,7 @@ pub async fn form_response(request: Request, metrics: Arc<Mutex<Metrics>>) -> Re
             guard.update(&command, duration);
             *guard.command_counts.get(&command).unwrap()
         };
-        debug!(
+        info!(
             "Processed command {} in {duration}ms, total number of commands of this type processed: {count}",
             serde_plain::to_string(&command).unwrap()
         );
