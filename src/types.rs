@@ -108,78 +108,22 @@ impl Command {
 
 /// An enumeration representing the possible server responses to a request.
 ///
+/// This is an internally tagged enum; its variant is set in the `status` field,
+/// and the response structure depends on its value.
+/// 
 /// This enum can be either:
-/// - `Ok`, containing a successful `OkResponse`,
-/// - `Err`, containing an error `ErrorResponse`.
+/// - `Ok`, containing the UUID of the corresponding request and the result of the command execution
+///   in the `response` field;
+/// - `Error`, containing the optional UUID of the request (if it could be retrieved)
+///   and the description of the error in the `error` field.
 ///
-/// It is (de)serialized as an untagged enum, meaning that the JSON structure itself
-/// determines which variant is used.2
-#[derive(Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Response {
-    Ok(OkResponse),
-    Err(ErrorResponse),
-}
-
-/// A structure representing a successful response from the server.
-///
-/// This response is returned when a request is processed without errors.
-/// It includes the `request_id` of the original request,
-/// a `status` field indicating success,
-/// and the actual result in the `response` field.
-///
-/// The format of the `response` field depends on the command that was executed.
-/// See the `Command` documentation for more information.
-#[derive(Serialize, Deserialize)]
-pub struct OkResponse {
-    /// The identifier of the original request without modification.
-    pub request_id: Uuid,
-
-    /// The status of the response. Always `Status::Ok` for this type.
-    pub status: Status,
-
-    /// The result of the executed command.
-    /// Its content depends on the specific command;
-    /// see the `Command` documentation for more information.
-    pub response: Value,
-}
-
-/// A structure representing an error response from the server.
-///
-/// This response is returned when an error occurs while processing a request.
-/// It includes:
-/// - the `request_id` of the original request, if provided.
-///   This is an optional field; it can be `null` if the request was not a valid JSON
-///   or could not be successfully deserialized into a `Request` structure.
-///   Note that partial requests (e.g., including `request_id` but missing `command`)
-///   will also result in the `request_id` of the response being `null`.
-/// - a `status` field indicating error;
-/// - an `error` field with the description of the error that occurred.
-#[derive(Serialize, Deserialize)]
-pub struct ErrorResponse {
-    /// The identifier of the original request without modification.
-    /// If the request could not be deserialized into a `Request` structure,
-    /// this field will be `null`.
-    pub request_id: Option<Uuid>,
-
-    /// The status of the response. Always `Status::Error` for this type.
-    pub status: Status,
-
-    /// A description of the error that occurred.
-    pub error: String,
-}
-
-/// An enumeration representing the status of a server response.
-///
-/// This enum indicates whether a response corresponds to the successful type (`OkResponse`)
-/// or the error type (`ErrorReponse`).
-///
-/// The variants are (de)serialized in lowercase, e.g., `"ok"` or `"error"`.
+/// The status is (de)serialized in lowercase, e.g. `{"status": "error"}`.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Status {
-    Ok,
-    Error,
+#[serde(tag = "status")]
+pub enum Response {
+    Ok { request_id: Uuid, response: Value },
+    Error { request_id: Option<Uuid>, error: String },
 }
 
 /// A structure for collecting performance metrics per command.

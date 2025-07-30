@@ -35,9 +35,8 @@ pub async fn handle_connection(mut stream: TcpStream, metrics: Arc<Mutex<Metrics
             debug!("Received data is not a valid JSON: {e}");
             send_response(
                 stream,
-                ErrorResponse {
+                Response::Error {
                     request_id: None,
-                    status: Status::Error,
                     error: "request is not a valid JSON".to_string(),
                 },
             )
@@ -52,9 +51,8 @@ pub async fn handle_connection(mut stream: TcpStream, metrics: Arc<Mutex<Metrics
             debug!("Received data is not a valid request: {e}");
             send_response(
                 stream,
-                ErrorResponse {
+                Response::Error {
                     request_id: None,
-                    status: Status::Error,
                     error: e.to_string(),
                 },
             )

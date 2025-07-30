@@ -24,16 +24,14 @@ pub async fn form_response(request: Request, metrics: Arc<Mutex<Metrics>>) -> Re
     let uuid = request.request_id;
     let command_kind = request.command.kind();
     let response = match process_command(request, metrics.clone()).await {
-        Ok(v) => Response::Ok(OkResponse {
+        Ok(v) => Response::Ok {
             request_id: uuid,
-            status: Status::Ok,
             response: v,
-        }),
-        Err(e) => Response::Err(ErrorResponse {
+        },
+        Err(e) => Response::Error {
             request_id: Some(uuid),
-            status: Status::Error,
             error: e.to_string(),
-        }),
+        },
     };
 
     if let Some(s) = start {
@@ -107,13 +105,17 @@ mod tests {
     async fn test_command_ping() {
         let metrics = build_metrics();
         let req = build_request(Command::Ping);
+        let uuid = req.request_id;
         let resp = form_response(req, metrics.clone()).await;
         match resp {
-            Response::Ok(v) => {
-                assert!(matches!(v.status, Status::Ok));
-                assert_eq!(v.response, json!("pong"));
+            Response::Ok {
+                request_id,
+                response,
+            } => {
+                assert_eq!(request_id, uuid);
+                assert_eq!(response, json!("pong"));
             }
-            Response::Err(_) => panic!("Expected OK response"),
+            Response::Error { .. } => panic!("Expected OK response"),
         }
     }
 
@@ -126,12 +128,15 @@ mod tests {
             .with_nanosecond(0)
             .expect("This shouldn't ever panic");
         let req = build_request(Command::Time);
+        let uuid = req.request_id;
         let resp = form_response(req, metrics.clone()).await;
         match resp {
-            Response::Ok(v) => {
-                assert!(matches!(v.status, Status::Ok));
-                let resp_str = v
-                    .response
+            Response::Ok {
+                request_id,
+                response,
+            } => {
+                assert_eq!(request_id, uuid);
+                let resp_str = response
                     .get("time")
                     .and_then(|v| v.as_str())
                     .expect("Missing `time` field in the response");
@@ -143,7 +148,7 @@ mod tests {
                 assert!((parsed - time).as_seconds_f32() >= 0.0);
                 assert!((parsed - time).as_seconds_f32() < 2.0);
             }
-            Response::Err(_) => panic!("Expected OK response"),
+            Response::Error { .. } => panic!("Expected OK response"),
         }
     }
 
@@ -152,13 +157,17 @@ mod tests {
         let metrics = build_metrics();
 
         let req = build_request(Command::Echo(json!("hello")));
+        let uuid = req.request_id;
         let resp = form_response(req, metrics.clone()).await;
         match resp {
-            Response::Ok(v) => {
-                assert!(matches!(v.status, Status::Ok));
-                assert_eq!(v.response, json!("hello"));
+            Response::Ok {
+                request_id,
+                response,
+            } => {
+                assert_eq!(request_id, uuid);
+                assert_eq!(response, json!("hello"));
             }
-            Response::Err(_) => panic!("Expected OK response"),
+            Response::Error { .. } => panic!("Expected OK response"),
         }
     }
 
@@ -180,13 +189,17 @@ mod tests {
                 a: item.1,
                 b: item.2,
             });
+            let uuid = req.request_id;
             let resp = form_response(req, metrics.clone()).await;
             match resp {
-                Response::Ok(v) => {
-                    assert!(matches!(v.status, Status::Ok));
-                    assert_eq!(v.response, json!({"result": item.3}));
+                Response::Ok {
+                    request_id,
+                    response,
+                } => {
+                    assert_eq!(request_id, uuid);
+                    assert_eq!(response, json!({"result": item.3}));
                 }
-                Response::Err(_) => panic!("Expected OK response"),
+                Response::Error { .. } => panic!("Expected OK response"),
             }
         }
 
@@ -195,10 +208,14 @@ mod tests {
             a: 5.0,
             b: 0.0,
         });
+        let uuid = Some(req.request_id);
         let resp = form_response(req, metrics.clone()).await;
         match resp {
-            Response::Err(e) => assert!(matches!(e.status, Status::Error)),
-            Response::Ok(_) => panic!("Expected Error response"),
+            Response::Error {
+                request_id,
+                error: _,
+            } => assert_eq!(request_id, uuid),
+            Response::Ok { .. } => panic!("Expected Error response"),
         }
     }
 
@@ -216,6 +233,7 @@ mod tests {
                 b: -1.05,
             }),
         ]);
+        let uuids: Vec<Uuid> = test_requests.iter().map(|i| i.request_id).collect();
         let expected_responses = [
             json!("pong"),
             json!({"key": "value"}),
@@ -223,16 +241,28 @@ mod tests {
         ];
 
         let req = build_request(Command::Batch(test_requests.clone()));
+        let batch_uuid = req.request_id;
         let resp = form_response(req, metrics.clone()).await;
 
         match resp {
-            Response::Err(_) => panic!("Expected OK response"),
-            Response::Ok(resp) => {
-                for (i, item) in resp.response.as_array().unwrap().iter().enumerate() {
-                    let content = OkResponse::deserialize(item).unwrap();
-                    assert_eq!(content.request_id, test_requests[i].request_id);
-                    assert!(matches!(content.status, Status::Ok));
-                    assert_eq!(content.response, expected_responses[i]);
+            Response::Error { .. } => panic!("Expected OK response"),
+            Response::Ok {
+                request_id,
+                response: batch
+            } => {
+                assert_eq!(request_id, batch_uuid);
+                for (i, item) in batch.as_array().unwrap().iter().enumerate() {
+                    let resp = Response::deserialize(item).unwrap();
+                    match resp {
+                        Response::Ok {
+                            request_id,
+                            response,
+                        } => {
+                            assert_eq!(request_id, uuids[i]);
+                            assert_eq!(response, expected_responses[i]);
+                        }
+                        Response::Error { .. } => panic!("Expected OK response"),
+                    }
                 }
             }
         }
