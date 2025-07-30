@@ -8,47 +8,30 @@ use uuid::Uuid;
 /// The server expects JSON requests that can be deserialized into this structure.
 /// Each request must contain:
 /// - a unique identifier in UUIDv4 format in the `request_id` field;
-/// - a string in the `command` field, which must be one of the commands supported by the server.
-/// This field determines the action the server takes and the response it returns.
+/// - a `command` field, which must be one of the commands supported by the server.
+/// This is an internally tagged enum where the associated payload is expected to be
+/// in the `payload` field. Each command has its own `payload` structure.
 ///
 /// Optionally, the request may also contain a `payload` field.
 /// This field is required for some commands and may be omitted for others.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Request {
     /// A unique request identifier.
     pub request_id: Uuid,
 
     /// A command specifying the action the server is requested to perform.
+    /// This also determines the structure of the `payload` field.
+    #[serde(flatten)]
     pub command: Command,
-
-    /// Optional data provided for some of the commands.
-    pub payload: Option<Value>,
-}
-
-/// A structure representing the `payload` content of a `Request` for the `Calculate` command.
-///
-/// This structure contains two operands and an arithmetic operation to perform on them.
-/// The server will perform the specified `operation` using the values of `a` and `b`,
-/// and return the result as a floating-point number.
-#[derive(Serialize, Deserialize)]
-pub struct CalculationPayload {
-    /// The arithmetic operation to perform.
-    pub operation: Operation,
-
-    /// The first operand.
-    pub a: f64,
-
-    /// The second operand.
-    pub b: f64,
 }
 
 /// An enumeration of supported arithmetic operations.
 ///
 /// This enum represents the possible values of the `operation` field
-/// in a `CalculationPayload`.
+/// in `Command::Calculate`'s payload.
 ///
 /// The operation values are (de)serialized in lowercase, e.g., `"add"`.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum Operation {
     Add,
@@ -57,40 +40,70 @@ pub enum Operation {
     Divide,
 }
 
-/// An enumeration of all of the commands supported by the server.
+
+/// A simplified enum representing the type of command, excluding payload details.
+/// 
+/// This is used, for example, for performance metrics where only the kind of command matters.
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub enum CommandKind {
+    Ping,
+    Echo,
+    Time,
+    Calculate,
+    Batch,
+}
+
+/// An enumeration of all of the commands supported by the server, each with its required payload.
 ///
-/// This enum represents the possible values of the `command` field in a `Request`.
-/// Each variant corresponds to a specific action the server can perform,
-/// and results in different `response` content in an `OkResponse`.
+/// This is an internally tagged enum; depending on its variant, the structure of the `payload`
+/// field is determined, as well as the content of the `response` field in an `OkResponse`.
 ///
 /// The command values are (de)serialized in lowercase, e.g., `"ping"`.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
+#[serde(tag = "command", content = "payload")]
 pub enum Command {
-    /// The server will return the string "pong".
+    /// Requires no payload. The server will return the string "pong".
     Ping,
 
     /// The server will return the content of the original request's `payload` field
-    /// without modifying it. If the `payload` field was omitted, the `response` will be `null`.
-    Echo,
+    /// without modifying it.
+    Echo(Value),
 
-    /// The server will return the current UTC time in RFC 3339 format.
+    /// Requires no payload. The server will return the current UTC time in RFC 3339 format.
     Time,
 
-    /// Requires the presence of the `payload` field in the request.
-    /// The `payload` must be deserializable into a `CalculationPayload` structure.
+    /// The `payload` field is expected to be an object with fields `operation`, `a`, and `b`.
+    /// The server will perform the specified `operation` (which must be a variant of `Operation`)
+    /// on the operands `a` and `b`.
     ///
     /// The server will return a JSON object in the format `{"result": <f64>}`,
     /// where `<f64>` is the result of the calculation as a floating-point number.
-    Calculate,
+    Calculate {
+        operation: Operation,
+        a: f64,
+        b: f64,
+    },
 
-    /// Requires the presence of the `payload` field in the request.
-    /// The `payload` must be an array of objects, each one of which
+    /// The `payload` field is expected to be an array of objects, each one of which
     /// can be deserialized into a separate `Request`.
     ///
     /// The server will return an array of `Response` structures,
     /// one for each `Request` provided in the `payload`.
-    Batch,
+    Batch(Vec<Request>),
+}
+
+impl Command {
+    /// Returns a simplified classification (`CommandKind`) of the given command, without payload.
+    pub fn kind(&self) -> CommandKind {
+        match self {
+            Command::Ping => CommandKind::Ping,
+            Command::Echo(_) => CommandKind::Echo,
+            Command::Time => CommandKind::Time,
+            Command::Calculate { .. } => CommandKind::Calculate,
+            Command::Batch(_) => CommandKind::Batch,
+        }
+    }
 }
 
 /// An enumeration representing the possible server responses to a request.
@@ -177,16 +190,16 @@ pub enum Status {
 #[derive(Default)]
 pub struct Metrics {
     /// The count of how many times each command has been processed.
-    pub command_counts: HashMap<Command, usize>,
+    pub command_counts: HashMap<CommandKind, usize>,
 
     /// The minimum processing time (in ms) observed for each command.
-    pub processing_time_min: HashMap<Command, f64>,
+    pub processing_time_min: HashMap<CommandKind, f64>,
 
     /// The maximum processing time (in ms) observed for each command.
-    pub processing_time_avg: HashMap<Command, f64>,
+    pub processing_time_avg: HashMap<CommandKind, f64>,
 
     /// The average processing time (in ms) observed for each command.
-    pub processing_time_max: HashMap<Command, f64>,
+    pub processing_time_max: HashMap<CommandKind, f64>,
 }
 
 impl Metrics {
@@ -196,24 +209,24 @@ impl Metrics {
     /// and recalculates the average processing time.
     ///
     /// # Parameters
-    /// - `command`: The command that has been processed.
+    /// - `command_kind`: The simplified representation of the command that has been processed.
     /// - `duration`: The processing time in milliseconds for this command execution.
-    pub fn update(&mut self, command: &Command, duration: f64) {
-        *self.command_counts.entry(command.clone()).or_default() += 1;
+    pub fn update(&mut self, command_kind: CommandKind, duration: f64) {
+        *self.command_counts.entry(command_kind).or_default() += 1;
 
         self.processing_time_min
-            .entry(command.clone())
+            .entry(command_kind)
             .and_modify(|old| *old = old.min(duration))
             .or_insert(duration);
 
         self.processing_time_max
-            .entry(command.clone())
+            .entry(command_kind)
             .and_modify(|old| *old = old.max(duration))
             .or_insert(duration);
 
-        let count = *self.command_counts.get(command).unwrap();
+        let count = *self.command_counts.get(&command_kind).unwrap();
         self.processing_time_avg
-            .entry(command.clone())
+            .entry(command_kind)
             .and_modify(|old| *old = (*old * (count - 1) as f64 + duration) / count as f64)
             .or_insert(duration);
     }
