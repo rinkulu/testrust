@@ -43,14 +43,14 @@ This ReadMe is also available in [English](README-EN.md)
 
 #### `echo`
 
-Возвращает содержимое `payload` запроса. В случае, если поле `payload` отсутствует, возвращает `null`:
+Возвращает содержимое `payload` запроса:
 ```js
 // запрос
 {
     ...
     "payload": {
         "number": 5,
-        "something": null
+        "nothing": null
     }
 }
 
@@ -59,7 +59,7 @@ This ReadMe is also available in [English](README-EN.md)
     ...
     "response": {
         "number": 5,
-        "something": null
+        "nothing": null
     }
 }
 ```

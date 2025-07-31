@@ -43,14 +43,14 @@ Returns `{"response": "pong"}`.
 
 #### `echo`
 
-Returns the content of the request's `payload` field. In case the field is missing, returns `null`:
+Returns the content of the request's `payload` field:
 ```js
 // request
 {
     ...
     "payload": {
         "number": 5,
-        "something": null
+        "nothing": null
     }
 }
 
@@ -59,7 +59,7 @@ Returns the content of the request's `payload` field. In case the field is missi
     ...
     "response": {
         "number": 5,
-        "something": null
+        "nothing": null
     }
 }
 ```
